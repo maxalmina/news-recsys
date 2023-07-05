@@ -52,7 +52,7 @@ class NewsDataset(Dataset):
     """
     Load news for evaluation.
     """
-    def __init__(self, news_path):
+    def __init__(self, news_path, bert_embedding_dir):
         super(NewsDataset, self).__init__()
         self.news_parsed = pd.read_table(
             news_path,
@@ -60,7 +60,9 @@ class NewsDataset(Dataset):
             converters={
                 attribute: literal_eval
                 for attribute in set(config.dataset_attributes['news']) & set([
-                    'title', 'abstract', 'title_entities', 'abstract_entities'
+                    'title', 'abstract', 'title_entities', 'abstract_entities', 'content',
+                     'title_bert', 'title_mask_bert', 'abstract_bert', 'abstract_mask_bert',
+                     'content_bert', 'content_mask_bert'
                 ])
             })
         self.news2dict = self.news_parsed.to_dict('index')
@@ -70,11 +72,36 @@ class NewsDataset(Dataset):
                     self.news2dict[key1][key2] = torch.tensor(
                         self.news2dict[key1][key2])
 
+        if model_name == 'Exp1' and not config.fine_tune:
+            if config.bert_level == 'word':
+                self.bert_embedding = {
+                    k: torch.from_numpy(
+                        np.load(
+                            path.join(bert_embedding_dir,
+                                      f'{k}_last_hidden_state.npy'))).float()
+                    for k in set(config.dataset_attributes['news'])
+                    & set(['title', 'abstract', 'content'])
+                }
+
+            elif config.bert_level == 'sentence':
+                self.bert_embedding = {
+                    k: torch.from_numpy(
+                        np.load(
+                            path.join(bert_embedding_dir,
+                                      f'{k}_pooler_output.npy'))).float()
+                    for k in set(config.dataset_attributes['news'])
+                    & set(['title', 'abstract', 'content'])
+                }
+
     def __len__(self):
         return len(self.news_parsed)
 
     def __getitem__(self, idx):
         item = self.news2dict[idx]
+        if model_name == 'Exp1' and not config.fine_tune:
+            for k in set(config.dataset_attributes['news']) & set(
+            ['title', 'abstract', 'content']):
+                item[k] = self.bert_embedding[k][idx]
         return item
 
 
@@ -182,7 +209,8 @@ def evaluate(model, directory, num_workers, max_count=sys.maxsize):
         nDCG@5
         nDCG@10
     """
-    news_dataset = NewsDataset(path.join(directory, 'news_parsed.tsv'))
+    news_dataset = NewsDataset(path.join(directory, 'news_parsed_bert.tsv'),
+                               path.join(directory, 'bert'))
     news_dataloader = DataLoader(news_dataset,
                                  batch_size=config.batch_size * 16,
                                  shuffle=False,
@@ -204,7 +232,7 @@ def evaluate(model, directory, num_workers, max_count=sys.maxsize):
         list(news2vector.values())[0].size())
 
     user_dataset = UserDataset(path.join(directory, 'behaviors.tsv'),
-                               'data/train/user2int.tsv')
+                               'data/kcm/train/user2int.tsv')
     user_dataloader = DataLoader(user_dataset,
                                  batch_size=config.batch_size * 16,
                                  shuffle=False,
@@ -222,10 +250,17 @@ def evaluate(model, directory, num_workers, max_count=sys.maxsize):
                             dim=0) for news_list in minibatch["clicked_news"]
             ],
                                               dim=0).transpose(0, 1)
+            #candidate_news_vector = torch.stack([
+            #    torch.stack([news2vector[x].to(device) for x in news_list],
+            #                dim=0) for news_list in minibatch["candidate_news"]
+            #],
+            #                                  dim=0).transpose(0, 1)
             if model_name == 'LSTUR':
                 user_vector = model.get_user_vector(
                     minibatch['user'], minibatch['clicked_news_length'],
                     clicked_news_vector)
+            #elif model_name == 'CAUM':
+            #    user_vector = model.get_user_vector(clicked_news_vector, candidate_news_vector)
             else:
                 user_vector = model.get_user_vector(clicked_news_vector)
             for user, vector in zip(user_strings, user_vector):
@@ -247,12 +282,19 @@ def evaluate(model, directory, num_workers, max_count=sys.maxsize):
         count += 1
         if count == max_count:
             break
-
+        #if model_name == 'CAUM':
+        #    candidate_news_vector = torch.stack([
+        #        news2vector[news[0].split('-')[0]]
+        #        for news in minibatch['impressions']
+        #    ],
+        #                                        dim=1)
+        #else:
         candidate_news_vector = torch.stack([
             news2vector[news[0].split('-')[0]]
             for news in minibatch['impressions']
         ],
                                             dim=0)
+
         user_vector = user2vector[minibatch['clicked_news_string'][0]]
         click_probability = model.get_prediction(candidate_news_vector,
                                                  user_vector)
@@ -287,7 +329,7 @@ if __name__ == '__main__':
     checkpoint = torch.load(checkpoint_path)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    auc, mrr, ndcg5, ndcg10 = evaluate(model, './data/test',
+    auc, mrr, ndcg5, ndcg10 = evaluate(model, './data/kcm/test',
                                        config.num_workers)
     print(
         f'AUC: {auc:.4f}\nMRR: {mrr:.4f}\nnDCG@5: {ndcg5:.4f}\nnDCG@10: {ndcg10:.4f}'

@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from dataset import BaseDataset
+from dataset_bert import BaseDataset
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,7 +22,6 @@ except AttributeError:
     exit()
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 
 class EarlyStopping:
     def __init__(self, patience=5):
@@ -63,11 +62,28 @@ def latest_checkpoint(directory):
     return os.path.join(directory,
                         all_checkpoints[max(all_checkpoints.keys())])
 
+def collate_fn(batch):
+    if isinstance(batch[0], tuple):
+        return tuple(collate_fn(list(x)) for x in zip(*batch))
+    elif isinstance(batch[0], dict):
+        return {key: collate_fn([x[key] for x in batch]) for key in batch[0]}
+    elif isinstance(batch[0], torch.Tensor):
+        return torch.stack(batch)
+    elif isinstance(batch[0], list):
+        if isinstance(batch[0][0], dict):
+            return {
+                key: collate_fn([collate_fn([x[key] for x in y]) for y in batch])
+                for key in batch[0][0]
+            }
+    elif isinstance(batch[0], str):
+        return batch
+
+    return torch.tensor(batch)
 
 def train():
     writer = SummaryWriter(
         log_dir=
-        f"./runs/{model_name}/{datetime.datetime.now().replace(microsecond=0).isoformat()}{'-' + os.environ['REMARK'] if 'REMARK' in os.environ else ''}"
+        f"./runs/{model_name}/{datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')}{'-' + os.environ['REMARK'] if 'REMARK' in os.environ else ''}"
     )
 
     if not os.path.exists('checkpoint'):
@@ -75,7 +91,7 @@ def train():
 
     try:
         pretrained_word_embedding = torch.from_numpy(
-            np.load('./data/train/pretrained_word_embedding.npy')).float()
+            np.load('./data/kcm/kcm/train/pretrained_word_embedding.npy')).float()
     except FileNotFoundError:
         pretrained_word_embedding = None
 
@@ -83,35 +99,38 @@ def train():
         try:
             pretrained_entity_embedding = torch.from_numpy(
                 np.load(
-                    './data/train/pretrained_entity_embedding.npy')).float()
+                    './data/kcm/train/pretrained_entity_embedding.npy')).float()
         except FileNotFoundError:
             pretrained_entity_embedding = None
 
         try:
             pretrained_context_embedding = torch.from_numpy(
                 np.load(
-                    './data/train/pretrained_context_embedding.npy')).float()
+                    './data/kcm/train/pretrained_context_embedding.npy')).float()
         except FileNotFoundError:
             pretrained_context_embedding = None
 
         model = Model(config, pretrained_word_embedding,
                       pretrained_entity_embedding,
                       pretrained_context_embedding).to(device)
-    elif model_name == 'Exp1':
+    elif model_name == 'Exp2':
         models = nn.ModuleList([
             Model(config, pretrained_word_embedding).to(device)
             for _ in range(config.ensemble_factor)
         ])
+    elif model_name == 'Exp1':
+        model = Model(config).to(device)
     else:
         model = Model(config, pretrained_word_embedding).to(device)
 
-    if model_name != 'Exp1':
+    if model_name != 'Exp2':
         print(model)
     else:
         print(models[0])
 
-    dataset = BaseDataset('data/train/behaviors_parsed.tsv',
-                          'data/train/news_parsed.tsv')
+    dataset = BaseDataset('data/kcm/train/behaviors_parsed.tsv',
+                          'data/kcm/train/news_parsed_bert.tsv',
+                          './data/kcm/train/bert')
 
     print(f"Load training dataset with size {len(dataset)}.")
 
@@ -121,8 +140,10 @@ def train():
                    shuffle=True,
                    num_workers=config.num_workers,
                    drop_last=True,
-                   pin_memory=True))
-    if model_name != 'Exp1':
+                   pin_memory=True,
+                   #collate_fn=collate_fn
+                   ))
+    if model_name != 'Exp2':
         criterion = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters(),
                                      lr=config.learning_rate)
@@ -147,7 +168,7 @@ def train():
         checkpoint = torch.load(checkpoint_path)
         early_stopping(checkpoint['early_stop_value'])
         step = checkpoint['step']
-        if model_name != 'Exp1':
+        if model_name != 'Exp2':
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             model.train()
@@ -189,7 +210,7 @@ def train():
         elif model_name == 'TANR':
             y_pred, topic_classification_loss = model(
                 minibatch["candidate_news"], minibatch["clicked_news"])
-        elif model_name == 'Exp1':
+        elif model_name == 'Exp2':
             y_preds = [
                 model(minibatch["candidate_news"], minibatch["clicked_news"])
                 for model in models
@@ -223,13 +244,13 @@ def train():
                     topic_classification_loss.item() / loss.item(), step)
             loss += config.topic_classification_loss_weight * topic_classification_loss
         loss_full.append(loss.item())
-        if model_name != 'Exp1':
+        if model_name != 'Exp2':
             optimizer.zero_grad()
         else:
             for optimizer in optimizers:
                 optimizer.zero_grad()
         loss.backward()
-        if model_name != 'Exp1':
+        if model_name != 'Exp2':
             optimizer.step()
         else:
             for optimizer in optimizers:
@@ -244,11 +265,11 @@ def train():
             )
 
         if i % config.num_batches_validate == 0:
-            (model if model_name != 'Exp1' else models[0]).eval()
+            (model if model_name != 'Exp2' else models[0]).eval()
             val_auc, val_mrr, val_ndcg5, val_ndcg10 = evaluate(
-                model if model_name != 'Exp1' else models[0], './data/val',
+                model if model_name != 'Exp2' else models[0], './data/kcm/val',
                 config.num_workers, 200000)
-            (model if model_name != 'Exp1' else models[0]).train()
+            (model if model_name != 'Exp2' else models[0]).train()
             writer.add_scalar('Validation/AUC', val_auc, step)
             writer.add_scalar('Validation/MRR', val_mrr, step)
             writer.add_scalar('Validation/nDCG@5', val_ndcg5, step)
@@ -265,10 +286,10 @@ def train():
                 try:
                     torch.save(
                         {
-                            'model_state_dict': (model if model_name != 'Exp1'
+                            'model_state_dict': (model if model_name != 'Exp2'
                                                  else models[0]).state_dict(),
                             'optimizer_state_dict':
-                            (optimizer if model_name != 'Exp1' else
+                            (optimizer if model_name != 'Exp2' else
                              optimizers[0]).state_dict(),
                             'step':
                             step,

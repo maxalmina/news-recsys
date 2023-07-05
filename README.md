@@ -9,15 +9,15 @@ The repository currently includes the following models.
 | NRMS      | Neural News Recommendation with Multi-Head Self-Attention                 | https://www.aclweb.org/anthology/D19-1671/         |
 | NAML      | Neural News Recommendation with Attentive Multi-View Learning             | https://arxiv.org/abs/1907.05576                   |
 | LSTUR     | Neural News Recommendation with Long- and Short-term User Representations | https://www.aclweb.org/anthology/P19-1033.pdf      |
-| DKN       | Deep Knowledge-Aware Network for News Recommendation                      | https://dl.acm.org/doi/abs/10.1145/3178876.3186175 |
 | Hi-Fi Ark | Deep User Representation via High-Fidelity Archive Network                | https://www.ijcai.org/Proceedings/2019/424         |
 | TANR      | Neural News Recommendation with Topic-Aware News Representation           | https://www.aclweb.org/anthology/P19-1110.pdf      |
+| CAUM      | Candidate-Aware User Modeling												| https://www.aclweb.org/anthology/P19-1110.pdf      |
 
 **Experimental models**
 
 | Model | Description                                                                                        |
 | ----- | -------------------------------------------------------------------------------------------------- |
-| Exp1  | NRMS + (Sub)category + Ensemble + Positional embedding                                             |
+| CAUM  | Using Title Only																					 |
 
 ## Get started
 
@@ -100,10 +100,11 @@ tensorboard --logdir=runs/{model_name}
 | Hi-Fi Ark |     |     |        |         |        |
 | TANR      |     |     |        |         |        |
 
-Checkpoints: <https://drive.google.com/open?id=TODO>
-
 You can verify the results by simply downloading them and running `MODEL_NAME=XXXX python3 src/evaluate.py`.
 
 ## Credits
 
 - Dataset by **MI**crosoft **N**ews **D**ataset (MIND), see <https://msnews.github.io/>.
+- Original code: https://github.com/yusanshi/news-recommendation
+- BERT implementation code: https://github.com/limhj159/NewsRecommendation
+- CAUM code: https://github.com/andreeaiana/simplifying_nnr

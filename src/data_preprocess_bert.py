@@ -8,7 +8,12 @@ from os import path
 from pathlib import Path
 import random
 from nltk.tokenize import word_tokenize
+
+import torch
+from transformers import AutoTokenizer, AutoModel
+
 import numpy as np
+
 import csv
 import importlib
 
@@ -81,7 +86,7 @@ def parse_behaviors(source, target, user2int_path):
         columns=['user', 'clicked_news', 'candidate_news', 'clicked'])
 
 
-def parse_news(source, target, category2int_path, word2int_path,
+def parse_news(source, target, bert_output_dir, category2int_path, word2int_path,
                #entity2int_path,
                mode):
     """
@@ -107,6 +112,105 @@ def parse_news(source, target, category2int_path, word2int_path,
     news.title_entities.fillna('[]', inplace=True)
     news.abstract_entities.fillna('[]', inplace=True)
     news.fillna(' ', inplace=True)
+
+    tokenizer = AutoTokenizer.from_pretrained("indolem/indobert-base-uncased")
+    title_bert = tokenizer(news.title.tolist(),
+                              padding='max_length',
+                              truncation=True,
+                              max_length=config.num_words_title)
+
+    abstract_bert = tokenizer(news.abstract.tolist(),
+                                 padding='max_length',
+                                 truncation=True,
+                                 max_length=config.num_words_abstract)
+
+    content_bert = tokenizer(news.content.tolist(),
+                             padding='max_length',
+                             truncation=True,
+                             max_length=config.num_words_content)
+
+    bert_df = pd.DataFrame(data=[
+        title_bert['input_ids'], title_bert['attention_mask'],
+        abstract_bert['input_ids'], abstract_bert['attention_mask'],
+        content_bert['input_ids'], content_bert['attention_mask']
+    ]).T
+
+
+    bert_df.columns = [
+        'title_bert', 'title_mask_bert',
+        'abstract_bert', 'abstract_mask_bert',
+        'content_bert', 'content_mask_bert'
+    ]
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    for x in [title_bert, abstract_bert, content_bert]:
+        for key in x.keys():
+            x[key] = torch.tensor(x[key]).to(device)
+
+    Path(bert_output_dir).mkdir(parents=True, exist_ok=True)
+
+    print(bert_output_dir)
+
+    bert = AutoModel.from_pretrained('indolem/indobert-base-uncased',
+                                        return_dict=True).to(device)
+    with torch.no_grad():
+        title_last_hidden_state = []
+        title_pooler_output = []
+        abstract_last_hidden_state = []
+        abstract_pooler_output = []
+        content_last_hidden_state = []
+        content_pooler_output = []
+
+        for count in tqdm(range(math.ceil(len(news) / config.batch_size)),
+                        desc="Calculating news embeddings with bert"):
+
+            # title
+            title_bert_minibatch = {
+                k: v[count * config.batch_size:(1 + count) * config.batch_size]
+                for k, v in title_bert.items()
+            }
+            title_outputs = bert(**title_bert_minibatch)
+            title_last_hidden_state.append(
+                title_outputs['last_hidden_state'].cpu().numpy())
+            title_pooler_output.append(
+                title_outputs['pooler_output'].cpu().numpy())
+            
+            # abstract
+            abstract_bert_minibatch = {
+                k: v[count * config.batch_size:(1 + count) * config.batch_size]
+                for k, v in abstract_bert.items()
+            }
+            abstract_outputs = bert(**abstract_bert_minibatch)
+            abstract_last_hidden_state.append(
+                abstract_outputs['last_hidden_state'].cpu().numpy())
+            abstract_pooler_output.append(
+                abstract_outputs['pooler_output'].cpu().numpy())
+
+            # content
+            content_bert_minibatch = {
+                k: v[count * config.batch_size:(1 + count) * config.batch_size]
+                for k, v in content_bert.items()
+            }
+            content_outputs = bert(**content_bert_minibatch)
+            content_last_hidden_state.append(
+                content_outputs['last_hidden_state'].cpu().numpy())
+            content_pooler_output.append(
+                content_outputs['pooler_output'].cpu().numpy())
+    
+        np.save(path.join(bert_output_dir, 'title_last_hidden_state.npy'),
+                np.concatenate(title_last_hidden_state, axis=0))
+        np.save(path.join(bert_output_dir, 'title_pooler_output.npy'),
+                np.concatenate(title_pooler_output, axis=0))
+
+        np.save(path.join(bert_output_dir, 'abstract_last_hidden_state.npy'),
+                np.concatenate(abstract_last_hidden_state, axis=0))
+        np.save(path.join(bert_output_dir, 'abstract_pooler_output.npy'),
+                np.concatenate(abstract_pooler_output, axis=0))
+
+        np.save(path.join(bert_output_dir, 'content_last_hidden_state.npy'),
+                np.concatenate(content_last_hidden_state, axis=0))
+        np.save(path.join(bert_output_dir, 'content_pooler_output.npy'),
+                np.concatenate(content_pooler_output, axis=0))
 
     def parse_row(row):
         new_row = [
@@ -223,6 +327,7 @@ def parse_news(source, target, category2int_path, word2int_path,
         #        entity2int[k] = len(entity2int) + 1
 
         parsed_news = news.swifter.apply(parse_row, axis=1)
+        parsed_news = pd.concat([parsed_news, bert_df], axis=1)
         parsed_news.to_csv(target, sep='\t', index=False)
 
         pd.DataFrame(category2int.items(),
@@ -257,6 +362,7 @@ def parse_news(source, target, category2int_path, word2int_path,
         #entity2int = dict(pd.read_table(entity2int_path).values.tolist())
 
         parsed_news = news.swifter.apply(parse_row, axis=1)
+        parsed_news = pd.concat([parsed_news, bert_df], axis=1)
         parsed_news.to_csv(target, sep='\t', index=False)
 
     else:
@@ -345,24 +451,25 @@ if __name__ == '__main__':
 
     print('Process data for training')
 
-    print('Parse behaviors')
-    parse_behaviors(path.join(train_dir, 'behaviors.tsv'),
-                    path.join(train_dir, 'behaviors_parsed.tsv'),
-                    path.join(train_dir, 'user2int.tsv'))
+    #print('Parse behaviors')
+    #parse_behaviors(path.join(train_dir, 'behaviors.tsv'),
+    #                path.join(train_dir, 'behaviors_parsed.tsv'),
+    #                path.join(train_dir, 'user2int.tsv'))
 
     print('Parse news')
     parse_news(path.join(train_dir, 'news.tsv'),
-               path.join(train_dir, 'news_parsed.tsv'),
-               path.join(train_dir, 'category2int.tsv'),
-               path.join(train_dir, 'word2int.tsv'),
+               path.join(train_dir, 'news_parsed_bert.tsv'),
+               path.join(train_dir, 'bert'),
+               path.join(train_dir, 'category2int_bert.tsv'),
+               path.join(train_dir, 'word2int_bert.tsv'),
                #path.join(train_dir, 'entity2int.tsv'),
                mode='train')
 
-    print('Generate word embedding')
-    generate_word_embedding(
-        f'./data/fasttext/idwiki.fasttext.{config.word_embedding_dim}d.txt',
-        path.join(train_dir, 'pretrained_word_embedding.npy'),
-        path.join(train_dir, 'word2int.tsv'))
+    #print('Generate word embedding')
+    #generate_word_embedding(
+    #    f'./data/fasttext/fasttext.4B.id.{config.word_embedding_dim}d.txt',
+    #    path.join(train_dir, 'pretrained_word_embedding.npy'),
+    #    path.join(train_dir, 'word2int.tsv'))
 
     #print('Transform entity embeddings')
     #transform_entity_embedding(
@@ -374,9 +481,10 @@ if __name__ == '__main__':
 
     print('Parse news')
     parse_news(path.join(val_dir, 'news.tsv'),
-               path.join(val_dir, 'news_parsed.tsv'),
-               path.join(train_dir, 'category2int.tsv'),
-               path.join(train_dir, 'word2int.tsv'),
+               path.join(val_dir, 'news_parsed_bert.tsv'),
+               path.join(val_dir, 'bert'),
+               path.join(train_dir, 'category2int_bert.tsv'),
+               path.join(train_dir, 'word2int_bert.tsv'),
                #path.join(train_dir, 'entity2int.tsv'),
                mode='test')
 
@@ -384,7 +492,8 @@ if __name__ == '__main__':
 
     print('Parse news')
     parse_news(path.join(test_dir, 'news.tsv'),
-               path.join(test_dir, 'news_parsed.tsv'),
+               path.join(test_dir, 'news_parsed_bert.tsv'),
+               path.join(test_dir, 'bert'),
                path.join(train_dir, 'category2int.tsv'),
                path.join(train_dir, 'word2int.tsv'),
                #path.join(train_dir, 'entity2int.tsv'),

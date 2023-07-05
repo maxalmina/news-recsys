@@ -1,17 +1,17 @@
 import torch
 
-from model.Exp1.news_encoder import NewsEncoder
-from model.Exp1.news_encoder2 import NewsEncoder2
-from model.Exp1.user_encoder import UserEncoder
+from model.CAUM.news_encoder import NewsEncoder
+from model.CAUM.news_encoder2 import NewsEncoder2
+from model.CAUM.user_encoder import UserEncoder
 from model.general.click_predictor.dot_product import DotProductClickPredictor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class Exp1(torch.nn.Module):
+class CAUM(torch.nn.Module):
     def __init__(self, config, pretrained_word_embedding=None):
-        super(Exp1, self).__init__()
+        super(CAUM, self).__init__()
         self.config = config
-        self.news_encoder = NewsEncoder(config)
+        self.news_encoder = NewsEncoder2(config, pretrained_word_embedding)
         self.user_encoder = UserEncoder(config)
         self.click_predictor = DotProductClickPredictor()
         
