@@ -9,27 +9,27 @@ The repository currently includes the following models.
 | NRMS      | Neural News Recommendation with Multi-Head Self-Attention                 | https://www.aclweb.org/anthology/D19-1671/         |
 | NAML      | Neural News Recommendation with Attentive Multi-View Learning             | https://arxiv.org/abs/1907.05576                   |
 | LSTUR     | Neural News Recommendation with Long- and Short-term User Representations | https://www.aclweb.org/anthology/P19-1033.pdf      |
-| Hi-Fi Ark | Deep User Representation via High-Fidelity Archive Network                | https://www.ijcai.org/Proceedings/2019/424         |
 | TANR      | Neural News Recommendation with Topic-Aware News Representation           | https://www.aclweb.org/anthology/P19-1110.pdf      |
 | CAUM      | Candidate-Aware User Modeling												| https://www.aclweb.org/anthology/P19-1110.pdf      |
 
 **Experimental models**
 
-| Model | Description                                                                                        |
-| ----- | -------------------------------------------------------------------------------------------------- |
-| CAUM  | Using Title Only																					 |
+| Model			| Description                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------- |
+| CAUM			| Using different news information Only																 |
+| CAUM-BERT		| CAUM + BERT in News Model													 |
 
 ## Get started
 
 Basic setup.
 
 ```bash
-git clone https://github.com/yusanshi/NewsRecommendation
+git clone <your_repo>
 cd NewsRecommendation
 pip3 install -r requirements.txt
 ```
 
-Download and preprocess the data.
+Download and preprocess the data for MIND dataset.
 
 ```bash
 mkdir data && cd data
