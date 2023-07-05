@@ -10,7 +10,7 @@ The repository currently includes the following models.
 | NAML      | Neural News Recommendation with Attentive Multi-View Learning             | https://arxiv.org/abs/1907.05576                   |
 | LSTUR     | Neural News Recommendation with Long- and Short-term User Representations | https://www.aclweb.org/anthology/P19-1033.pdf      |
 | TANR      | Neural News Recommendation with Topic-Aware News Representation           | https://www.aclweb.org/anthology/P19-1110.pdf      |
-| CAUM      | Candidate-Aware User Modeling												| https://www.aclweb.org/anthology/P19-1110.pdf      |
+| CAUM      | Candidate-Aware User Modeling												| https://dl.acm.org/doi/10.1145/3477495.3531778     |
 
 **Experimental models**
 
